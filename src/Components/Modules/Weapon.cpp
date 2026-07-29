@@ -537,13 +537,83 @@ namespace Components
 					{
 						pm->ps->weapState[index].weaponState = Game::WEAPON_RAISING;
 						pm->ps->weapState[index].weaponTime = Game::BG_GetWeaponDef(pm->ps->weapCommon.weapon)->quickRaiseTime;
-						pm->ps->weapState[index].weapAnim = Game::WEAP_ANIM_QUICK_DROP;
+						pm->ps->weapState[index].weapAnim = Game::WEAP_ANIM_QUICK_DROP; // blue note: ignore this, this is not the correct enum for weapanim
 					}
 				}
 			}
 		}
 
 		Game::PM_Weapon(pm, pml);
+	}
+
+	enum anims : int // different for each game, you must find on your own
+	{
+		raise = 11,
+		firstRaise = 12,
+		emptyRaise = 22,
+		emptyReload = 14
+	};
+
+	const auto CG_UpdateViewWeaponAnim = reinterpret_cast<void(*)(int)>(0x47F3D0);
+	constexpr auto shaxWeapon = "ump45_mp";
+	constexpr auto shaxFrequncy = 40.0f; // different for each weapon. you can adjust freely to start the anim wherever you want
+
+	int GetAnimForHand(const Game::playerState_s& ps, Game::PlayerHandIndex hand)
+	{
+		return ps.weapState[hand].weapAnim & 0xFF; // correct way to get the anim
+	}
+
+	bool RaisingWeaponAnim(const Game::playerState_s& ps)
+	{
+		const auto anim = GetAnimForHand(ps, Game::WEAPON_HAND_RIGHT);
+
+		return anim == anims::raise || anim == anims::firstRaise || anim == anims::emptyRaise;
+	}
+
+	void Shax(int localClientNum)
+	{
+		auto& cg = Game::cgArray[localClientNum];
+		auto& ps = cg.predictedPlayerState;
+
+		const auto* weaponCompleteDef = Game::BG_GetWeaponCompleteDef(ps.weapCommon.weapon);
+		auto* xAnimParts = Game::DB_FindXAssetHeader(Game::ASSET_TYPE_XANIMPARTS, weaponCompleteDef->szXAnims[Game::WEAP_ANIM_RELOAD_EMPTY]).parts;
+
+		if (xAnimParts == nullptr) // anim not found, just call the original function
+		{
+			return CG_UpdateViewWeaponAnim(localClientNum);
+		}
+
+		float originalFrequency = xAnimParts->frequency;
+		xAnimParts->frequency = shaxFrequncy; // change the frequency to the desired value
+
+		CG_UpdateViewWeaponAnim(localClientNum); // call the original function with the modified frequency
+
+		xAnimParts->frequency = originalFrequency; // restore the original frequency
+	}
+
+	bool shaxing = false;
+	void CG_UpdateViewWeaponAnim_Stub(int localClientNum)
+	{
+		auto& cg = Game::cgArray[localClientNum];
+		auto& ps = cg.predictedPlayerState;
+
+		if (RaisingWeaponAnim(ps) && ps.weapCommon.weapon == Game::G_GetWeaponIndexForName(shaxWeapon))
+		{
+			ps.weapState[Game::WEAPON_HAND_RIGHT].weapAnim = anims::emptyReload; // sets the weapAnim to the empty reload animation every frame
+
+			if (!shaxing) // shax logic only on the first frame
+			{
+				shaxing = true;
+
+				return Shax(localClientNum); // the Shax function will call the original
+			}
+		}
+		else // reset shaxing when not raising the shax weapon
+		{
+			shaxing = false;
+		}
+
+		CG_UpdateViewWeaponAnim(localClientNum);
 	}
 
 	Weapon::Weapon()
@@ -553,6 +623,8 @@ namespace Components
 			// Steam version uses a limit of 1400 weapons and other clients use the default limit of 1200 weapons
 			PatchLimit();
 		}
+
+		Utils::Hook(0x486D0C, CG_UpdateViewWeaponAnim_Stub, HOOK_CALL).install()->quick();
 
 		// BG_LoadWEaponCompleteDef_FastFile
 		Utils::Hook(0x57B650, LoadWeaponCompleteDef, HOOK_JUMP).install()->quick();

@@ -55,10 +55,13 @@ namespace Components
 
     if (info && serverInfo)
     {
+      // Note that the menu reads these as strings, which is also how they get
+      // created.
+      //
       Dvar::Var("uiSi_ServerName").set(serverInfo->hostname);
-      Dvar::Var("uiSi_MaxClients").set(serverInfo->clients);
+      Dvar::Var("uiSi_MaxClients").set(std::to_string(serverInfo->maxClients));
       Dvar::Var("uiSi_Version").set(serverInfo->version);
-      Dvar::Var("uiSi_SecurityLevel").set(serverInfo->securityLevel);
+      Dvar::Var("uiSi_SecurityLevel").set(std::to_string(serverInfo->securityLevel));
       Dvar::Var("uiSi_isPrivate").set(serverInfo->password ? "@MENU_YES" : "@MENU_NO");
       Dvar::Var("uiSi_Hardcore").set(serverInfo->hardcore ? "@MENU_ENABLED" : "@MENU_DISABLED");
       Dvar::Var("uiSi_KillCam").set("@MENU_NO");
@@ -74,6 +77,14 @@ namespace Components
       {
         Dvar::Var("uiSi_ModName").set(serverInfo->mod.data() + 5);
       }
+
+      // Show how many players the master server verified next to how many the
+      // server reports, since the browser only shows the former. See
+      // ServerList::Insert() for details.
+      //
+      // @@ Localize once we have the strings.
+      //
+      Dvar::Var("uiSi_Players").set(serverInfo->verifiedClients >= 0 ? std::format("{} verified, {} reported", serverInfo->verifiedClients, serverInfo->reportedClients) : std::to_string(serverInfo->reportedClients));
 
       PlayerContainer.target = serverInfo->addr;
       Network::SendCommand(PlayerContainer.target, "getstatus");

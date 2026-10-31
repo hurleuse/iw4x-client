@@ -46,7 +46,6 @@ namespace Components
   ServerList::Container ServerList::RefreshContainer;
 
   std::vector<ServerList::ServerInfo> ServerList::OnlineList;
-  std::unordered_map<Network::Address, int> ServerList::VerifiedClients;
   std::vector<ServerList::ServerInfo> ServerList::OfflineList;
   std::vector<ServerList::ServerInfo> ServerList::FavouriteList;
 
@@ -406,7 +405,6 @@ namespace Components
     Logger::Print("Response from the master server contains {} servers\n", list.Size());
 
     std::size_t count = 0;
-    VerifiedClients.clear();
 
     for (const auto& entry : list.GetArray())
     {
@@ -441,15 +439,6 @@ namespace Components
       // Using VA because it's faster
       Network::Address server(Utils::String::VA("%s:%u", entry["ip"].GetString(), entry["port"].GetInt()));
       server.setType(Game::NA_IP); // Just making sure...
-
-      // Remember the number of players the master server counted from the
-      // clients themselves. The server reports its own count when we query
-      // it, but it can report whatever it likes. See Presence for details.
-      //
-      if (entry.HasMember("verified_clients") && entry["verified_clients"].IsInt())
-      {
-        VerifiedClients[server] = entry["verified_clients"].GetInt();
-      }
 
       InsertRequest(server);
       ++count;
@@ -780,8 +769,6 @@ namespace Components
         s.version       = entry.value ("version", "");
         s.clients       = entry.value ("clients", 0);
         s.bots          = entry.value ("bots", 0);
-        s.verifiedClients = entry.value ("verifiedClients", -1);
-        s.reportedClients = entry.value ("reportedClients", s.clients);
         s.maxClients    = entry.value ("maxClients", 0);
         s.password      = entry.value ("password", false);
         s.ping          = entry.value ("ping", 999);
@@ -841,8 +828,6 @@ namespace Components
       e["version"]       = s.version;
       e["clients"]       = s.clients;
       e["bots"]          = s.bots;
-      e["verifiedClients"] = s.verifiedClients;
-      e["reportedClients"] = s.reportedClients;
       e["maxClients"]    = s.maxClients;
       e["password"]      = s.password;
       e["ping"]          = s.ping;
@@ -1024,9 +1009,6 @@ namespace Components
       server.matchType = std::strtol(info.get("matchtype").data(), nullptr, 10);
       server.clients = std::strtol(info.get("clients").data(), nullptr, 10);
       server.bots = std::strtol(info.get("bots").data(), nullptr, 10);
-
-      const auto verified = VerifiedClients.find(address);
-      server.verifiedClients = verified != VerifiedClients.end() ? verified->second : -1;
       server.securityLevel = std::strtol(info.get("securityLevel").data(), nullptr, 10);
       server.maxClients = std::strtol(info.get("sv_maxclients").data(), nullptr, 10);
       server.password = info.get("isPrivate") == "1"s;
@@ -1080,21 +1062,6 @@ namespace Components
       if (static_cast<std::size_t>(server.clients) > Game::MAX_CLIENTS || static_cast<std::size_t>(server.maxClients) > Game::MAX_CLIENTS)
       {
         return;
-      }
-
-      // Don't show more players than the master server counted. The server
-      // can report whatever it likes but the master server only counts the
-      // players whose game tells it where they play.
-      //
-      // Note that this undercounts players on older versions, which don't
-      // tell the master server, but we would rather that than let servers
-      // inflate their count.
-      //
-      server.reportedClients = server.clients;
-
-      if (server.verifiedClients >= 0)
-      {
-        server.clients = std::min(server.clients, server.verifiedClients);
       }
 
       // Check if already inserted and update in-place
